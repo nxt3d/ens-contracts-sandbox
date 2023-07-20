@@ -672,7 +672,7 @@ contract NameWrapper is
         node = _makeNode(parentNode, labelhash);
         _checkCanCallSetSubnodeOwner(parentNode, node);
         _checkFusesAreSettable(node, fuses);
-        _saveLabel(parentNode, node, label);
+        bytes memory name = _saveLabel(parentNode, node, label);
         expiry = _checkParentFusesAndExpiry(parentNode, node, fuses, expiry);
         if (!_isWrapped(node)) {
             ens.setSubnodeRecord(
@@ -682,7 +682,7 @@ contract NameWrapper is
                 resolver,
                 ttl
             );
-            _storeNameAndWrap(parentNode, node, label, owner, fuses, expiry);
+            _wrap(node, name, owner, fuses, expiry);
         } else {
             ens.setSubnodeRecord(
                 parentNode,
@@ -990,18 +990,6 @@ contract NameWrapper is
     ) internal {
         _mint(node, wrappedOwner, fuses, expiry);
         emit NameWrapped(node, name, wrappedOwner, fuses, expiry);
-    }
-
-    function _storeNameAndWrap(
-        bytes32 parentNode,
-        bytes32 node,
-        string memory label,
-        address owner,
-        uint32 fuses,
-        uint64 expiry
-    ) internal {
-        bytes memory name = _addLabel(label, names[parentNode]);
-        _wrap(node, name, owner, fuses, expiry);
     }
 
     function _saveLabel(
