@@ -205,17 +205,7 @@ contract NameWrapper is
     function setUpgradeContract(
         INameWrapperUpgrade _upgradeAddress
     ) public onlyOwner {
-        if (address(upgradeContract) != address(0)) {
-            registrar.setApprovalForAll(address(upgradeContract), false);
-            ens.setApprovalForAll(address(upgradeContract), false);
-        }
-
         upgradeContract = _upgradeAddress;
-
-        if (address(upgradeContract) != address(0)) {
-            registrar.setApprovalForAll(address(upgradeContract), true);
-            ens.setApprovalForAll(address(upgradeContract), true);
-        }
     }
 
     /**
@@ -552,7 +542,22 @@ contract NameWrapper is
             uint256(node)
         );
 
+        // Get labelhash from the name
+        (bytes32 labelhash, ) = name.readLabel(0);
+
         address approved = getApproved(uint256(node));
+
+        // If the name is a second level .eth then change the registrant to the upgrade contract.
+        if (fuses & IS_DOT_ETH == IS_DOT_ETH) {
+            registrar.transferFrom(
+                address(this),
+                address(upgradeContract),
+                uint256(labelhash)
+            );
+        }
+
+        // Change the owner in the registry to the upgrade contract.
+        ens.setOwner(node, address(upgradeContract));
 
         _burn(uint256(node));
 

@@ -40,21 +40,18 @@ contract UpgradedNameWrapperMock is INameWrapperUpgrade {
         bytes32 parentNode = name.namehash(offset);
         bytes32 node = _makeNode(parentNode, labelhash);
 
+        // Check to make sure we are the owner of the name.
         if (parentNode == ETH_NODE) {
             address registrant = registrar.ownerOf(uint256(labelhash));
-            require(
-                msg.sender == registrant &&
-                    registrar.isApprovedForAll(registrant, address(this)),
-                "No approval for registrar"
-            );
-        } else {
-            address owner = ens.owner(node);
-            require(
-                msg.sender == owner &&
-                    ens.isApprovedForAll(owner, address(this)),
-                "No approval for registry"
-            );
+            require(registrant == address(this));
         }
+
+        address owner = ens.owner(node);
+        require(owner == address(this));
+
+        // To really check that we are the owner change the resolver to this address and the TTL to 100
+        ens.setRecord(node, address(this), address(this), 100);
+
         emit NameUpgraded(
             name,
             wrappedOwner,

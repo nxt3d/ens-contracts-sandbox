@@ -78,9 +78,7 @@ contract TestUnwrap is Ownable {
         address registrant = registrar.ownerOf(tokenId);
 
         require(
-            approvedWrapper[sender] &&
-                sender == registrant &&
-                registrar.isApprovedForAll(registrant, address(this)),
+            approvedWrapper[sender] && address(this) == registrant,
             "Unauthorised"
         );
 
@@ -96,9 +94,7 @@ contract TestUnwrap is Ownable {
         address owner = ens.owner(node);
 
         require(
-            approvedWrapper[sender] &&
-                owner == sender &&
-                ens.isApprovedForAll(owner, address(this)),
+            approvedWrapper[sender] && owner == address(this),
             "Unauthorised"
         );
 
