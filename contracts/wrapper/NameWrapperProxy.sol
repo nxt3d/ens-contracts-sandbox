@@ -1,7 +1,9 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ~0.8.17;
 
-import {INameWrapper} from "./INameWrapper.sol";
+import {INameWrapper, IS_DOT_ETH} from "./INameWrapper.sol";
+import {INameWrapperUpgrade} from "./INameWrapperUpgrade.sol";
+import {INameWrapperProxy} from "./INameWrapperProxy.sol";
 import {ERC1155Fuse} from "./ERC1155Fuse.sol";
 import {INameWrapperUpgrade} from "./INameWrapperUpgrade.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -9,27 +11,25 @@ import {IMetadataService} from "./IMetadataService.sol";
 import {ENS} from "../registry/ENS.sol";
 import {IBaseRegistrar} from "../ethregistrar/IBaseRegistrar.sol";
 import {BytesUtils} from "./BytesUtils.sol";
+import {ERC165} from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
-contract NameWrapperProxy is Ownable {
-    INameWrapper nameWrapper;
-    INameWrapperUpgrade upgradeContract;
+contract NameWrapperProxy is
+    INameWrapperProxy,
+    INameWrapperUpgrade,
+    Ownable,
+    ERC165
+{
+    INameWrapper public nameWrapper;
+    INameWrapperUpgrade public upgradeContract;
 
-    ENS ens;
-    IBaseRegistrar registrar;
+    ENS public ens;
+    IBaseRegistrar public registrar;
 
     using BytesUtils for bytes;
 
     bytes32 private constant ETH_NODE =
         0x93cdeb708b7545dc668eb9280176169d1c33cfd8ed6f04690a0bcc88a93fc4ae;
-
-    event NameUpgraded(
-        bytes name,
-        address wrappedOwner,
-        uint32 fuses,
-        uint64 expiry,
-        address approved,
-        bytes extraData
-    );
 
     constructor(
         ENS _ens,
@@ -39,6 +39,15 @@ contract NameWrapperProxy is Ownable {
         ens = _ens;
         registrar = _registrar;
         nameWrapper = _nameWrapper;
+    }
+
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view virtual override(ERC165, IERC165) returns (bool) {
+        return
+            interfaceId == type(INameWrapperUpgrade).interfaceId ||
+            interfaceId == type(INameWrapperProxy).interfaceId ||
+            super.supportsInterface(interfaceId);
     }
 
     /* Metadata service */
@@ -79,19 +88,19 @@ contract NameWrapperProxy is Ownable {
         bytes32 parentNode = name.namehash(offset);
         bytes32 node = _makeNode(parentNode, labelhash);
 
-        // Check to make sure we are the owner of the name.
-        if (parentNode == ETH_NODE) {
-            address registrant = registrar.ownerOf(uint256(labelhash));
-            require(registrant == address(this));
+        // If the name is a second level .eth then change the registrant to the upgrade contract.
+        if (fuses & IS_DOT_ETH == IS_DOT_ETH) {
+            registrar.transferFrom(
+                address(nameWrapper),
+                address(upgradeContract),
+                uint256(labelhash)
+            );
         }
 
-        address owner = ens.owner(node);
-        require(owner == address(this));
+        // Change the owner in the registry to the upgrade contract.
+        ens.setOwner(node, address(upgradeContract));
 
-        // To really check that we are the owner change the resolver to this address and the TTL to 100
-        ens.setRecord(node, address(this), address(this), 100);
-
-        emit NameUpgraded(
+        upgradeContract.wrapFromUpgrade(
             name,
             wrappedOwner,
             fuses,
