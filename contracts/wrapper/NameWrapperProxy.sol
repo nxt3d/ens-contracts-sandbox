@@ -1,18 +1,43 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ~0.8.17;
 
-import {INameWrapper, CANNOT_UNWRAP, CANNOT_BURN_FUSES, CANNOT_TRANSFER, CANNOT_SET_RESOLVER, CANNOT_SET_TTL, CANNOT_CREATE_SUBDOMAIN, CANNOT_APPROVE, PARENT_CANNOT_CONTROL, CAN_DO_EVERYTHING, IS_DOT_ETH, CAN_EXTEND_EXPIRY, PARENT_CONTROLLED_FUSES, USER_SETTABLE_FUSES} from "./INameWrapper.sol";
+import {INameWrapper} from "./INameWrapper.sol";
 import {ERC1155Fuse} from "./ERC1155Fuse.sol";
 import {INameWrapperUpgrade} from "./INameWrapperUpgrade.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IMetadataService} from "./IMetadataService.sol";
+import {ENS} from "../registry/ENS.sol";
+import {IBaseRegistrar} from "../ethregistrar/IBaseRegistrar.sol";
+import {BytesUtils} from "./BytesUtils.sol";
 
 contract NameWrapperProxy is Ownable {
     INameWrapper nameWrapper;
     INameWrapperUpgrade upgradeContract;
 
-    // create a constructor that sets the nameWrapper address
-    constructor(INameWrapper _nameWrapper) {
+    ENS ens;
+    IBaseRegistrar registrar;
+
+    using BytesUtils for bytes;
+
+    bytes32 private constant ETH_NODE =
+        0x93cdeb708b7545dc668eb9280176169d1c33cfd8ed6f04690a0bcc88a93fc4ae;
+
+    event NameUpgraded(
+        bytes name,
+        address wrappedOwner,
+        uint32 fuses,
+        uint64 expiry,
+        address approved,
+        bytes extraData
+    );
+
+    constructor(
+        ENS _ens,
+        IBaseRegistrar _registrar,
+        INameWrapper _nameWrapper
+    ) {
+        ens = _ens;
+        registrar = _registrar;
         nameWrapper = _nameWrapper;
     }
 
@@ -42,39 +67,44 @@ contract NameWrapperProxy is Ownable {
         upgradeContract = _upgradeAddress;
     }
 
-    /**
-     * @notice Upgrades a domain of any kind. Could be a .eth name vitalik.eth, a DNSSEC name vitalik.xyz, or a subdomain
-     * @dev Can be called by the owner or an authorised caller
-     * @param name The name to upgrade, in DNS format
-     * @param extraData Extra data to pass to the upgrade contract
-     */
+    function wrapFromUpgrade(
+        bytes calldata name,
+        address wrappedOwner,
+        uint32 fuses,
+        uint64 expiry,
+        address approved,
+        bytes calldata extraData
+    ) public {
+        (bytes32 labelhash, uint256 offset) = name.readLabel(0);
+        bytes32 parentNode = name.namehash(offset);
+        bytes32 node = _makeNode(parentNode, labelhash);
 
-    function upgrade(bytes calldata name, bytes calldata extraData) public {
-        bytes32 node = name.namehash(0);
-
-        if (address(upgradeContract) == address(0)) {
-            revert CannotUpgrade();
+        // Check to make sure we are the owner of the name.
+        if (parentNode == ETH_NODE) {
+            address registrant = registrar.ownerOf(uint256(labelhash));
+            require(registrant == address(this));
         }
 
-        if (!canModifyName(node, msg.sender)) {
-            revert Unauthorised(node, msg.sender);
-        }
+        address owner = ens.owner(node);
+        require(owner == address(this));
 
-        (address currentOwner, uint32 fuses, uint64 expiry) = getData(
-            uint256(node)
-        );
+        // To really check that we are the owner change the resolver to this address and the TTL to 100
+        ens.setRecord(node, address(this), address(this), 100);
 
-        address approved = getApproved(uint256(node));
-
-        _burn(uint256(node));
-
-        upgradeContract.wrapFromUpgrade(
+        emit NameUpgraded(
             name,
-            currentOwner,
+            wrappedOwner,
             fuses,
             expiry,
             approved,
             extraData
         );
+    }
+
+    function _makeNode(
+        bytes32 node,
+        bytes32 labelhash
+    ) private pure returns (bytes32) {
+        return keccak256(abi.encodePacked(node, labelhash));
     }
 }
